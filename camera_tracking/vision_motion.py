@@ -13,6 +13,7 @@ if not cap.isOpened():
 
 print('commencing video loop, press q to stop')
 
+
 # intialize PID controllers for the pan and tilt motors, they have to be 
 # separate because different forces act on them, gravity acts on our upward and downward tilt but is negligible on our pan 
 # since it only rotates about the earth splane
@@ -28,6 +29,8 @@ except Exception as e:
     print('serial port failed')
     pico_serial = None
 
+# intialize the calculus engine that, checks the frame matrix fro moving pixels on the video
+back_sub = cv2.createBackgroundSubtractorMOG2(history = 3000,varThreshold = 40, detectShadows = False)
 
 # extract the camearas physical resolution limits
 W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -48,19 +51,18 @@ while True:
         print('camera not reading')
         break
 
-    # we need to convert our BGR to hue and saturation and value
-    # to be able to cancel out noises
-    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # using MOG2 to get a new binary matrix to identify 
+    # any frame that moves
+    mask = back_sub.apply(frame)
 
-    # we need to be able to define the colors we want it to see
-    # define an upper end of the color and a lower end of the color
-    # that is to be passed into the system
-    lower = np.array([100,100,100])
-    upper = np.array([140,255,255])
+    # create an array of ones which is our brush to clea noice
+    kernel = np.ones((5,5), np.uint8)
 
-    # using this threshold to get a new binary matrix to identify 
-    # anything in between
-    mask = cv2.inRange(hsv_frame, lower, upper)
+    # sweep our brush though the mask to clean all the tiny noice
+    # cleans all tiny white noice to black
+    mask = cv2.erode(mask, kernel, iterations = 1)
+    # cleans any place we see a lot of white and amplify it
+    mask = cv2.dilate(mask, kernel, iterations = 3)
     
     # lets trace all the white bobs in our image
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -68,7 +70,7 @@ while True:
     # now we confirm if there are actually any blue objects in the screen
     if len(contours) > 0:
         # sort and isolate the largest white(blue) object
-        largest_contour = max(contours, key = cv2.contourArea)
+        largest_contour = max(contours, key= cv2.contourArea)
 
         # noise rejection i.e reject tiny objects and its area is more that 500 pixels
         if cv2.contourArea(largest_contour) > 500:
